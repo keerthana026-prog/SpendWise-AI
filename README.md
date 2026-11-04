@@ -3,6 +3,9 @@
 **An AI-powered personal finance and expense management application.**
 
 SpendWise AI helps users track their expenses, manage monthly budgets, monitor savings goals, and understand their spending habits through AI-powered financial insights.
+## 🚀 Live Demo
+
+[Open SpendWise AI](https://spendwise-aigit-etpgbbispmauucnifnwmca.streamlit.app/)
 
 ## 🚀 Project Overview
 
