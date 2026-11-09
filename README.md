@@ -5,7 +5,7 @@
 SpendWise AI helps users track their expenses, manage monthly budgets, monitor savings goals, and understand their spending habits through AI-powered financial insights.
 ## 🚀 Live Demo
 
-http://localhost:8501/
+[https://spendwise-aigit-etpgbbispmauucnifnwmca.streamlit.app/](https://spendwise-aigit-etpgbbispmauucnifnwmca.streamlit.app/)
 
 ## 🚀 Project Overview
 
