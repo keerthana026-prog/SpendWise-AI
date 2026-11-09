@@ -13,6 +13,17 @@ from database import (
     update_saved_amount,
     delete_savings_goal
 )
+from paypal_integration import (
+    create_paypal_order,
+    capture_paypal_order
+)
+
+from database import (
+    save_paypal_order,
+    complete_paypal_payment,
+    update_paypal_payment_status,
+    get_paypal_payments
+)
 
 from ai_insights import generate_insights
 
@@ -98,12 +109,13 @@ with st.sidebar:
     page = st.radio(
         "Navigation",
         [
-            "Dashboard",
-            "Expenses",
-            "AI Assistant",
-            "Savings Goals",
-            "Financial Summary"
-        ]
+    "Dashboard",
+    "Expenses",
+    "AI Assistant",
+    "Savings Goals",
+    "Financial Summary",
+    "PayPal Payments"
+]
     )
 
     st.divider()
@@ -777,6 +789,228 @@ elif page == "Financial Summary":
 
         st.info(
             "Create a savings goal to see your savings overview."
+        )
+
+# --------------------------------------------------
+# PAYPAL PAYMENTS
+# --------------------------------------------------
+
+elif page == "PayPal Payments":
+
+    st.title("💳 PayPal Payments")
+    st.write(
+        "Create and test secure payments using PayPal Sandbox."
+    )
+
+    st.info(
+        "This is a Sandbox demonstration. "
+        "Payments are made using test accounts, not real money."
+    )
+
+    # PayPal return and cancel URLs
+    app_url = (
+        "https://spendwise-aigit-etpgbbispmauucnifnwmca.streamlit.app/"
+    )
+
+    return_url = app_url + "?paypal=return"
+    cancel_url = app_url + "?paypal=cancel"
+
+    # Handle PayPal redirect after buyer approval
+    paypal_action = st.query_params.get("paypal")
+    returned_order_id = st.query_params.get("token")
+
+    if paypal_action == "cancel":
+
+        st.warning(
+            "Payment was cancelled. No completed payment was recorded."
+        )
+
+    elif paypal_action == "return" and returned_order_id:
+
+        st.subheader("Verifying your PayPal payment...")
+
+        try:
+
+            payments = get_paypal_payments()
+
+            saved_order = next(
+                (
+                    payment for payment in payments
+                    if payment[1] == returned_order_id
+                ),
+                None
+            )
+
+            if saved_order is None:
+
+                st.error(
+                    "This PayPal order was not found in SpendWise AI."
+                )
+
+            elif saved_order[6] == "COMPLETED":
+
+                st.success(
+                    "This payment has already been verified successfully!"
+                )
+
+            else:
+
+                verified_payment = capture_paypal_order(
+                    returned_order_id,
+                    saved_order[4],
+                    saved_order[5]
+                )
+
+                complete_paypal_payment(
+                    verified_payment["order_id"],
+                    verified_payment["capture_id"]
+                )
+
+                st.success(
+                    "Payment completed and verified successfully!"
+                )
+
+                st.write(
+                    f"Amount: {verified_payment['currency']} "
+                    f"{verified_payment['amount']:.2f}"
+                )
+
+                st.write(
+                    f"Transaction ID: "
+                    f"{verified_payment['capture_id']}"
+                )
+
+        except Exception as error:
+
+            st.error(
+                f"Payment verification failed: {error}"
+            )
+
+    st.divider()
+
+    # Create a new PayPal order
+    st.subheader("Create a Sandbox Payment")
+
+    with st.form("paypal_payment_form"):
+
+        payment_description = st.text_input(
+            "Payment Description",
+            placeholder="Example: Online purchase"
+        )
+
+        payment_amount = st.number_input(
+            "Payment Amount (USD)",
+            min_value=1.0,
+            value=10.0,
+            step=1.0
+        )
+
+        create_payment = st.form_submit_button(
+            "Create PayPal Payment"
+        )
+
+    if create_payment:
+
+        try:
+
+            order = create_paypal_order(
+                payment_amount,
+                payment_description,
+                return_url,
+                cancel_url
+            )
+
+            save_paypal_order(
+                order["id"],
+                payment_description,
+                payment_amount,
+                "USD"
+            )
+
+            st.session_state["paypal_approval_url"] = (
+                order["approval_url"]
+            )
+
+            st.session_state["paypal_order_id"] = (
+                order["id"]
+            )
+
+            st.success("PayPal order created successfully!")
+
+        except Exception as error:
+
+            st.error(
+                f"Could not create PayPal order: {error}"
+            )
+
+    # Display buyer approval link
+    if st.session_state.get("paypal_approval_url"):
+
+        st.subheader("Approve Your Payment")
+
+        st.write(
+            "Click below to open PayPal Sandbox and approve "
+            "your test payment."
+        )
+
+        st.link_button(
+            "Open PayPal to Approve Payment",
+            st.session_state["paypal_approval_url"],
+            type="primary"
+        )
+
+        st.caption(
+            "After approval, PayPal will redirect you back "
+            "to SpendWise AI for payment verification."
+        )
+
+        st.caption(
+            f"Order ID: "
+            f"{st.session_state.get('paypal_order_id', '')}"
+        )
+
+    st.divider()
+
+    # Display payment history
+    st.subheader("PayPal Payment History")
+
+    payment_history = get_paypal_payments()
+
+    if payment_history:
+
+        payment_df = pd.DataFrame(
+            payment_history,
+            columns=[
+                "ID",
+                "Order ID",
+                "Capture ID",
+                "Description",
+                "Amount",
+                "Currency",
+                "Status",
+                "Created At"
+            ]
+        )
+
+        st.dataframe(
+            payment_df[
+                [
+                    "Description",
+                    "Amount",
+                    "Currency",
+                    "Status",
+                    "Created At"
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True
+        )
+
+    else:
+
+        st.info(
+            "No PayPal payments recorded yet. "
+            "Create your first Sandbox payment above."
         )
 
 
