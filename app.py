@@ -795,9 +795,15 @@ elif page == "Financial Summary":
 # PAYPAL PAYMENTS
 # --------------------------------------------------
 
+
+# --------------------------------------------------
+# PAYPAL PAYMENTS
+# --------------------------------------------------
+
 elif page == "PayPal Payments":
 
     st.title("💳 PayPal Payments")
+
     st.write(
         "Create and test secure payments using PayPal Sandbox."
     )
@@ -807,7 +813,6 @@ elif page == "PayPal Payments":
         "Payments are made using test accounts, not real money."
     )
 
-    # PayPal return and cancel URLs
     app_url = (
         "https://spendwise-aigit-etpgbbispmauucnifnwmca.streamlit.app/"
     )
@@ -815,80 +820,206 @@ elif page == "PayPal Payments":
     return_url = app_url + "?paypal=return"
     cancel_url = app_url + "?paypal=cancel"
 
-    # Handle PayPal redirect after buyer approval
     paypal_action = st.query_params.get("paypal")
     returned_order_id = st.query_params.get("token")
+
+    # ----------------------------------------------
+    # HANDLE CANCELLED PAYMENT
+    # ----------------------------------------------
 
     if paypal_action == "cancel":
 
         st.warning(
-            "Payment was cancelled. No completed payment was recorded."
+            "Payment was cancelled. "
+            "No completed payment was recorded."
         )
+
+    # ----------------------------------------------
+    # HANDLE PAYPAL RETURN
+    # ----------------------------------------------
 
     elif paypal_action == "return" and returned_order_id:
 
-        st.subheader("Verifying your PayPal payment...")
+        st.subheader("Verify and Record Your Payment")
 
-        try:
+        payments = get_paypal_payments()
 
-            payments = get_paypal_payments()
+        saved_order = next(
+            (
+                payment
+                for payment in payments
+                if payment[1] == returned_order_id
+            ),
+            None
+        )
 
-            saved_order = next(
-                (
-                    payment for payment in payments
-                    if payment[1] == returned_order_id
-                ),
-                None
+        if saved_order is None:
+
+            st.error(
+                "This PayPal order was not found "
+                "in SpendWise AI."
             )
 
-            if saved_order is None:
+        else:
 
-                st.error(
-                    "This PayPal order was not found in SpendWise AI."
-                )
+            st.write(
+                f"Payment description: {saved_order[3]}"
+            )
 
-            elif saved_order[6] == "COMPLETED":
+            st.write(
+                f"Original payment: "
+                f"{saved_order[5]} {saved_order[4]:.2f}"
+            )
+
+            if saved_order[6] == "COMPLETED":
 
                 st.success(
-                    "This payment has already been verified successfully!"
+                    "PayPal capture is already completed. "
+                    "We will not capture it again."
                 )
+
+                if not saved_order[2]:
+                    st.error(
+                        "The completed payment has no saved capture ID. "
+                        "Please inspect the database before proceeding."
+                    )
 
             else:
 
-                verified_payment = capture_paypal_order(
-                    returned_order_id,
-                    saved_order[4],
-                    saved_order[5]
+                st.info(
+                    "Your payment has returned from PayPal. "
+                    "Click the button below to capture and verify it."
                 )
 
-                complete_paypal_payment(
-                    verified_payment["order_id"],
-                    verified_payment["capture_id"]
-                )
+            st.divider()
 
-                st.success(
-                    "Payment completed and verified successfully!"
-                )
+            st.subheader("USD to INR Conversion")
 
-                st.write(
-                    f"Amount: {verified_payment['currency']} "
-                    f"{verified_payment['amount']:.2f}"
-                )
-
-                st.write(
-                    f"Transaction ID: "
-                    f"{verified_payment['capture_id']}"
-                )
-
-        except Exception as error:
-
-            st.error(
-                f"Payment verification failed: {error}"
+            exchange_rate = st.number_input(
+                "Enter INR value for 1 USD",
+                min_value=0.0,
+                value=0.0,
+                step=0.1,
+                format="%.4f",
+                key=f"paypal_rate_{returned_order_id}"
             )
+
+            st.caption(
+                "Enter the exchange rate you want to use "
+                "for your expense record. The original USD "
+                "amount remains unchanged in PayPal history."
+            )
+
+            if st.button(
+                "Verify Payment and Record INR Expense",
+                type="primary",
+                key=f"verify_paypal_{returned_order_id}"
+            ):
+
+                if exchange_rate <= 0:
+
+                    st.error(
+                        "Please enter a valid USD to INR exchange rate."
+                    )
+
+                elif (
+                    saved_order[6] == "COMPLETED"
+                    and not saved_order[2]
+                ):
+
+                    st.error(
+                        "Capture ID is missing. "
+                        "Please inspect the saved payment."
+                    )
+
+                else:
+
+                    try:
+
+                        # If already completed, reuse its capture ID.
+                        # Never capture the same completed order again.
+
+                        if saved_order[6] == "COMPLETED":
+
+                            verified_payment = {
+                                "order_id": saved_order[1],
+                                "capture_id": saved_order[2],
+                                "amount": float(saved_order[4]),
+                                "currency": saved_order[5]
+                            }
+
+                        else:
+
+                            # Capture and verify with PayPal.
+                            verified_payment = capture_paypal_order(
+                                returned_order_id,
+                                saved_order[4],
+                                saved_order[5]
+                            )
+
+                        # Save payment status and INR expense
+                        # together in one database transaction.
+
+                        result = complete_paypal_payment(
+                            verified_payment["order_id"],
+                            verified_payment["capture_id"],
+                            exchange_rate
+                        )
+
+                        st.success(
+                            "Payment verified successfully!"
+                        )
+
+                        if result["expense_created"]:
+
+                            st.success(
+                                "INR expense created automatically!"
+                            )
+
+                        else:
+
+                            st.info(
+                                "This payment's expense was already "
+                                "recorded. No duplicate was created."
+                            )
+
+                        st.metric(
+                            "Expense Recorded",
+                            f"₹{result['expense_amount_inr']:,.2f}"
+                        )
+
+                        st.write(
+                            f"Original payment: "
+                            f"{verified_payment['currency']} "
+                            f"{verified_payment['amount']:.2f}"
+                        )
+
+                        st.write(
+                            f"Exchange rate: "
+                            f"₹{exchange_rate:.4f} per USD"
+                        )
+
+                        st.write(
+                            f"Expense ID: {result['expense_id']}"
+                        )
+
+                        st.write(
+                            f"Capture ID: "
+                            f"{verified_payment['capture_id']}"
+                        )
+
+                    except Exception as error:
+
+                        st.error(
+                            f"Payment verification failed: {error}"
+                        )
 
     st.divider()
 
-    # Create a new PayPal order
+    # ----------------------------------------------
+    # CREATE NEW PAYPAL ORDER
+    # ----------------------------------------------
+
     st.subheader("Create a Sandbox Payment")
 
     with st.form("paypal_payment_form"):
@@ -935,7 +1066,9 @@ elif page == "PayPal Payments":
                 order["id"]
             )
 
-            st.success("PayPal order created successfully!")
+            st.success(
+                "PayPal order created successfully!"
+            )
 
         except Exception as error:
 
@@ -943,14 +1076,17 @@ elif page == "PayPal Payments":
                 f"Could not create PayPal order: {error}"
             )
 
-    # Display buyer approval link
+    # ----------------------------------------------
+    # DISPLAY APPROVAL LINK
+    # ----------------------------------------------
+
     if st.session_state.get("paypal_approval_url"):
 
         st.subheader("Approve Your Payment")
 
         st.write(
-            "Click below to open PayPal Sandbox and approve "
-            "your test payment."
+            "Click below to open PayPal Sandbox "
+            "and approve your test payment."
         )
 
         st.link_button(
@@ -960,8 +1096,8 @@ elif page == "PayPal Payments":
         )
 
         st.caption(
-            "After approval, PayPal will redirect you back "
-            "to SpendWise AI for payment verification."
+            "After approval, PayPal will redirect you "
+            "to SpendWise AI for verification."
         )
 
         st.caption(
@@ -971,7 +1107,10 @@ elif page == "PayPal Payments":
 
     st.divider()
 
-    # Display payment history
+    # ----------------------------------------------
+    # PAYPAL PAYMENT HISTORY
+    # ----------------------------------------------
+
     st.subheader("PayPal Payment History")
 
     payment_history = get_paypal_payments()
@@ -1012,14 +1151,3 @@ elif page == "PayPal Payments":
             "No PayPal payments recorded yet. "
             "Create your first Sandbox payment above."
         )
-
-
-# --------------------------------------------------
-# FOOTER
-# --------------------------------------------------
-
-st.divider()
-
-st.caption(
-    "SpendWise AI | Smart Personal Finance Assistant"
-)
